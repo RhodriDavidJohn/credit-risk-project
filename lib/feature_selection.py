@@ -116,11 +116,13 @@ class WoETransformer(BaseEstimator, TransformerMixin):
                  variables: list[str] | None = None,
                  bins: int = 10,
                  woe_func: Callable[[pd.Series, pd.Series], pd.DataFrame] = calculate_classification_woe,
-                 unseen_woe: float = 0.0):
+                 unseen_woe: float = 0.0,
+                 custom_bins: dict[str, list[float]] | None = None):
         self.variables = variables      # None = encode every column
         self.bins = bins
         self.woe_func = woe_func
         self.unseen_woe = unseen_woe    # WoE for a bin never seen in training (0 = average risk)
+        self.custom_bins = custom_bins
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
         y = pd.Series(np.asarray(y), index=X.index)   # align by position, not by old index labels
@@ -128,7 +130,10 @@ class WoETransformer(BaseEstimator, TransformerMixin):
         self.edges_, self.woe_maps_, self.woe_tables_ = {}, {}, {}
 
         for var in self.variables_:
-            edges = _fit_bins(X[var], self.bins)
+            if self.custom_bins and var in self.custom_bins:
+                edges = np.array([-np.inf, *sorted(self.custom_bins[var]), np.inf])
+            else:
+                edges = _fit_bins(X[var], self.bins)
             table = self.woe_func(_bin_variable(X[var], edges), y)
             self.edges_[var] = edges
             self.woe_maps_[var] = dict(zip(table["Cutoff"].astype(str), table["WoE"]))
