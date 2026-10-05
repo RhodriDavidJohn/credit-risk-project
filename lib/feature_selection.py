@@ -127,6 +127,14 @@ class WoETransformer(BaseEstimator, TransformerMixin):
     def fit(self, X: pd.DataFrame, y: pd.Series):
         y = pd.Series(np.asarray(y), index=X.index)   # align by position, not by old index labels
         self.variables_ = list(X.columns) if self.variables is None else list(self.variables)
+
+        if self.custom_bins is not None:
+            if not isinstance(self.custom_bins, dict):
+                raise TypeError(f"custom_bins must be a dict {{variable: [cut points]}}, got {type(self.custom_bins).__name__}")
+            unknown = set(self.custom_bins) - set(self.variables_)
+            if unknown:
+                raise ValueError(f"custom_bins given for variables not being encoded: {unknown}")
+
         self.edges_, self.woe_maps_, self.woe_tables_ = {}, {}, {}
 
         for var in self.variables_:
