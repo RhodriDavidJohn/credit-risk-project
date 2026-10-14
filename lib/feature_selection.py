@@ -126,6 +126,7 @@ class WoETransformer(BaseEstimator, TransformerMixin):
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
         y = pd.Series(np.asarray(y), index=X.index)   # align by position, not by old index labels
+        self.feature_names_in_ = list(X.columns)
         self.variables_ = list(X.columns) if self.variables is None else list(self.variables)
 
         if self.custom_bins is not None:
@@ -148,9 +149,23 @@ class WoETransformer(BaseEstimator, TransformerMixin):
             self.woe_tables_[var] = table
         return self
 
+    def bin_labels(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        The bin each value falls into (using the edges learned in fit) - for monitoring, not modelling.
+        """
+        return pd.DataFrame({var: _apply_bins(X[var], self.edges_[var]) for var in self.variables_},
+                            index=X.index)
+
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         X = X.copy()
         for var in self.variables_:
             labels = _apply_bins(X[var], self.edges_[var])
             X[f"{var}_woe"] = labels.map(self.woe_maps_[var]).fillna(self.unseen_woe)
         return X.drop(columns=self.variables_)
+
+    def get_feature_names_out(self, input_features=None) -> np.ndarray:
+        """Column names produced by transform(): passthrough columns, then '<var>_woe' columns."""
+        if not hasattr(self, "variables_"):
+            raise AttributeError("Transformer is not fitted yet.")
+        passthrough = [c for c in self.feature_names_in_ if c not in self.variables_]
+        return np.array(passthrough + [f"{var}_woe" for var in self.variables_])
