@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
+from sklearn.base import clone
 from sklearn.model_selection import cross_val_score
 
 
@@ -32,3 +34,14 @@ def coefficient_checks(pipe, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
     return pd.DataFrame({"Coefficient": coefs,
                          "Sign OK": [c < 0 if col.endswith("_woe") else np.nan for col, c in coefs.items()],
                          "VIF": vif(Z)})
+
+
+def coefficient_inference(pipe, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+    """Standard errors, 95% CIs and p-values from an unpenalised logit on the pipeline's transformed features.
+    Treats the WoE values as fixed, so it ignores binning uncertainty (a bootstrap would include it)."""
+    fitted = clone(pipe).fit(X, y)
+    Z = fitted[:-1].transform(X)
+    res = sm.Logit(np.asarray(y), sm.add_constant(Z)).fit(disp=0)
+    ci = res.conf_int()
+    return pd.DataFrame({"Coefficient": res.params, "Std error": res.bse,
+                         "CI lower": ci[0], "CI upper": ci[1], "p-value": res.pvalues})

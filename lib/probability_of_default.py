@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2, binomtest
+from scipy.stats import chi2, binomtest, norm
 from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
@@ -88,7 +88,7 @@ def psi(expected, actual, n_bins: int = 10) -> pd.DataFrame:
                          "PSI": (act_pct - exp_pct) * np.log(act_pct / exp_pct)})
 
 
-# ---------- the model: fit once, predict many times ----------
+# ---------- the model ----------
 
 class ProbabilityOfDefault:
     """A PD model = an estimator (e.g. a Pipeline) plus an optional calibration step.
@@ -112,6 +112,60 @@ class ProbabilityOfDefault:
     def fit(self, X, y):
         self.fitted_model_ = self._build().fit(X, y)
         return self
+
+    def get_feature_importance(self, alpha: float = 0.05, odds_ratio: bool = False) -> pd.DataFrame:
+        if not hasattr(self, 'fitted_model_'):
+            raise AttributeError("This model instance is not fitted yet. Call 'fit' first.")
+
+        if self.calibration is not None:
+            pipelines = [
+                getattr(fold, "estimator", getattr(fold, "base_estimator", None))
+                for fold in self.fitted_model_.calibrated_classifiers_
+            ]
+        else:
+            pipelines = [self.fitted_model_]
+
+        feature_step = pipelines[0].steps[-2][1]
+        if hasattr(feature_step, "get_feature_names_out"):
+            variables = list(feature_step.get_feature_names_out())
+        elif hasattr(feature_step, "variables_"):
+            variables = feature_step.variables_
+        else:
+            raise AttributeError("Second-to-last step does not expose variable names.")
+
+        all_fold_coefs = [pipe.steps[-1][1].coef_ for pipe in pipelines]
+        all_fold_coefs = np.array(all_fold_coefs)
+
+        if all_fold_coefs.ndim > 2:
+            all_fold_coefs = all_fold_coefs.squeeze(axis=1)
+
+        mean_coefs = np.mean(all_fold_coefs, axis=0)
+        min_coefs = np.min(all_fold_coefs, axis=0)
+        max_coefs = np.max(all_fold_coefs, axis=0)
+
+        if odds_ratio:
+            summary_df = pd.DataFrame({
+                "Variable": variables,
+                "Mean Odds Ratio": np.exp(mean_coefs),
+                "Minimum Odds Ratio": np.exp(min_coefs),
+                "Maximum Odds Ratio": np.exp(max_coefs)
+            })
+            # Sort by furthest deviation from 1.0 (neutral effect)
+            return summary_df.sort_values(
+                by="Mean Odds Ratio", 
+                key=lambda x: np.abs(1 - x), 
+                ascending=False
+            ).reset_index(drop=True)
+            
+        else:
+            summary_df = pd.DataFrame({
+                "Variable": variables,
+                "Mean Coefficient": mean_coefs,
+                "Minimum Coefficient": min_coefs,
+                "Maximum Coefficient": max_coefs
+            })
+            # Sort by highest absolute coefficient multiplier
+            return summary_df.sort_values(by="Mean Coefficient", key=abs, ascending=False).reset_index(drop=True)
 
     def predict_pd(self, X) -> np.ndarray:
         if not hasattr(self, "fitted_model_"):
